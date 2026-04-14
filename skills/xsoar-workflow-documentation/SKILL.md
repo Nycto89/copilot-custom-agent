@@ -189,12 +189,14 @@ graph TD
 - Automations: [A1](../automations/a1.md)
 
 ## Commands Used in This Workflow
+Drive this table from the integration's `commands_used` array in the manifest (commands actually invoked by playbooks in this workflow). Cross-reference the command name against `integrationScript.commands` in the fetched integration JSON to pull the description/arguments.
+
 | Command | Called From | Purpose |
 |---------|-------------|---------|
 | vt-file-scan | Root → Task 5 | File hash enrichment |
 
 ## Full Command Inventory
-<Bulleted list of every command the integration exposes, from the fetched JSON's `commands` array. Include one-line description.>
+Bulleted list of every command the integration exposes — drive from the manifest's `available_commands` array (which is populated from the fetched JSON's `integrationScript.commands`). Include a one-line description pulled from each command's `description` field.
 
 ## Configuration Parameters
 <Table of configuration parameters from the fetched JSON. Credentials are already redacted by the fetch script — do not re-expose redacted fields.>
@@ -215,14 +217,24 @@ graph TD
 From the manifest:
 
 1. Start with `graph TD`.
-2. Node per playbook from `manifest.playbooks` — double-bordered.
-3. Node per automation from `manifest.automations` — plain rectangle.
-4. Node per integration from `manifest.integrations` — cylinder.
+2. Node per playbook from `manifest.playbooks` — double-bordered. Use `name` for the label, `id` for the node key.
+3. Node per automation from `manifest.automations` — plain rectangle. Use `name` for label, `id` for node key.
+4. Node per integration from `manifest.integrations` — cylinder. Use `brand` for label/key.
 5. Edges:
-   - For each playbook: edge to each of its `sub_playbooks`, `automations`, `integrations`.
-   - For each automation: if the automation's fetched JSON shows it uses integration commands (check for `dependsOn` or parsed script content), draw dashed edges to those integrations.
+   - For each playbook: edge to each entry in its `sub_playbooks` (by `id`), `automations` (by `id`), and `integrations` (by `brand`).
+   - For each integration, the `commands_used` array lists the commands actually invoked by playbooks in this workflow; surface these in the integration's doc rather than as diagram edges.
 6. Keep labels short (use names, not IDs). Confluence-rendered mermaid fails on long labels.
 7. If total nodes > 40, group by layer: `subgraph Playbooks ... end`, `subgraph Automations ... end`, `subgraph Integrations ... end`.
+
+## Manifest Schema Reference
+
+Key fields the doc generator relies on:
+
+- `playbooks[].sub_playbooks` — list of `{id, name}`. An `id` that does not appear in `playbooks[].id` means the sub-playbook was not fetched (external/builtin) — render as bold text, not a link.
+- `playbooks[].automations` — list of `{id, name}`. An `id` not in `automations[].id` means the automation was not fetched.
+- `playbooks[].integrations` — list of `{brand, commands}` where `commands` are the specific integration commands invoked from that playbook.
+- `automations[]` — top-level list. Each entry has `id`, `name`, `file`, `used_by_playbooks`, `status`.
+- `integrations[]` — top-level list. Each entry has `brand`, `file`, `used_by_playbooks`, `commands_used` (commands actually invoked in this workflow), `available_commands` (everything the integration exposes, from its `integrationScript.commands`), `status`.
 
 ## Special Cases
 
