@@ -308,17 +308,24 @@ def fetch_reference_catalogs():
             print(f"  (skip) '{slug}' — endpoint returned 4xx (likely unauthorized)")
             result[slug] = {"status": "unauthorized", "file": None, "count": 0}
             continue
-        if not text.strip():
+        # Strip UTF-8 BOM and common XSSI prefixes before trying to parse.
+        cleaned = text.lstrip("\ufeff").lstrip()
+        for prefix in (")]}',\n", ")]}',", ")]}'\n", ")]}'"):
+            if cleaned.startswith(prefix):
+                cleaned = cleaned[len(prefix):].lstrip()
+                break
+
+        if not cleaned:
             print(f"  (skip) '{slug}' — empty response body")
             result[slug] = {"status": "empty", "file": None, "count": 0}
             continue
 
         path = reference_output_path(slug)
         try:
-            data = json.loads(text)
+            data = json.loads(cleaned)
         except ValueError as e:
             # Try NDJSON (one JSON object per line) before giving up.
-            lines = [ln for ln in text.splitlines() if ln.strip()]
+            lines = [ln for ln in cleaned.splitlines() if ln.strip()]
             try:
                 data = [json.loads(ln) for ln in lines]
                 print(f"  Parsed '{slug}' as NDJSON ({len(data)} entries)")
@@ -327,13 +334,18 @@ def fetch_reference_catalogs():
                 os.makedirs(os.path.dirname(raw_path), exist_ok=True)
                 with open(raw_path, "w", encoding="utf-8") as f:
                     f.write(text)
-                print(f"  (skip) '{slug}' — could not parse response as JSON ({e}). Raw body saved to {raw_path}")
+                first_char = repr(text[:1]) if text else "<empty>"
+                looks_like_html = cleaned[:1] == "<"
+                hint = " (response looks like HTML — likely an auth/proxy page, not JSON)" if looks_like_html else ""
+                print(f"  (skip) '{slug}' — could not parse as JSON ({e}). First char: {first_char}, length: {len(text)}.{hint} Raw body saved to {raw_path}")
                 result[slug] = {
                     "status": "parse_error",
                     "file": None,
                     "raw_file": raw_path.replace("\\", "/"),
                     "count": 0,
                     "error": str(e),
+                    "first_char": first_char,
+                    "length": len(text),
                 }
                 continue
 
