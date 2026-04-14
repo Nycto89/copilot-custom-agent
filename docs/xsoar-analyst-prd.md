@@ -35,12 +35,16 @@ The agent runs entirely within VS Code using GitHub Copilot Chat (GPT-4.1) with 
 
 ### Phase 1.6 — Document Full Workflow (Current)
 - Recursive fetch of a root playbook's entire dependency tree (sub-playbooks, automations, integrations)
+- One-shot fetch of reference catalogs (incident fields, indicator types) for cross-linking, tolerant of limited-permission API keys
 - Cycle-safe via visited-set; unlimited depth
 - Linked document set with cross-references — shared components documented once and referenced from every consumer
-- Per-workflow output folder: `investigation/docs/<root>/` with `README.md`, `playbooks/`, `automations/`, `integrations/` subfolders
-- Workflow overview with dependency graph, component tables, execution summary, cross-reference index
-- Manifest JSON drives doc generation and link resolution
-- All per-playbook docs reuse the Phase 1.5 full deep-dive template
+- Per-workflow output folder: `investigation/docs/<root>/` with `README.md`, `glossary.md`, `playbooks/`, `automations/`, `integrations/` subfolders
+- README includes a **runbook narrative** (3–5 prose paragraphs walking trigger → phases → decisions → outcomes → operator interventions) plus dependency graph, component tables, incident-fields-used table, and cross-reference index
+- Per-playbook docs include a task-by-task walkthrough, decision map, manual-task catalog, loops/polling, and error-handling surface — not just a high-level summary
+- Per-automation docs surface execution environment (docker image, run-as, run-once, sensitive, tags) and invocation sites (which playbook tasks call them with which arguments)
+- Per-integration docs render a full per-command reference with argument schemas, output schemas, and invocation sites for every command used in the workflow
+- `glossary.md` defines every XSOAR concept the docs use, linked from first occurrence — supports mixed SOC audience (engineers + analysts + managers)
+- Manifest JSON drives doc generation and link resolution, with `tasks_by_id`, `invocations[]`, `command_schemas{}`, `workflow_incident_fields`, and `reference_catalogs` surfaces
 
 ### Phase 2 — Refactor (Future)
 - Suggest specific code changes to fix identified issues
@@ -84,9 +88,10 @@ VS Code + GitHub Copilot Chat (GPT-4.1)
             |--- playbooks/    (downloaded playbook JSON)
             |--- automations/  (downloaded automation JSON)
             |--- integrations/ (sanitized integration JSON)
+            |--- reference/    (one-shot catalogs: incident fields, indicator types)
             |--- reports/      (analysis report markdown)
             |--- docs/         (playbook documentation markdown)
-            |     |--- <root>/ (per-workflow folder: README.md, manifest.json, playbooks/, automations/, integrations/)
+            |     |--- <root>/ (per-workflow folder: README.md, glossary.md, manifest.json, playbooks/, automations/, integrations/)
 ```
 
 ---
@@ -269,11 +274,18 @@ The agent evaluates playbooks against these 8 categories (full details in the an
 - [ ] Cycle detection prevents infinite loops on self-referencing or shared sub-playbooks
 - [ ] All automations referenced anywhere in the tree are fetched (name-resolution failures are skipped, not fatal)
 - [ ] All integrations referenced anywhere in the tree are fetched with credentials stripped
+- [ ] Reference catalogs (`/incidentfields`, `/indicatortype`) fetch into `investigation/reference/` with graceful degradation on 4xx (status recorded, crawl continues)
+- [ ] Manifest contains `tasks_by_id`, `invocations[]`, `command_schemas{}`, `workflow_incident_fields`, and `reference_catalogs` for every applicable record
 - [ ] Agent correctly routes "workflow" / "comprehensive" / "dependency tree" prompts
-- [ ] Linked doc set produced under `investigation/docs/<root>/` with README, manifest, and the three subfolders
-- [ ] Per-playbook docs reuse the Phase 1.5 full deep-dive template and include cross-reference links to automations, integrations, and sub-playbooks
+- [ ] Linked doc set produced under `investigation/docs/<root>/` with README, glossary, manifest, and the three subfolders
+- [ ] README includes a runbook narrative (3–5 paragraphs) covering trigger, main phases, key decisions, terminal outcomes, and operator interventions
+- [ ] Per-playbook docs include task-by-task walkthrough (every task in execution order), decision map, manual-task catalog, loops/polling, error-handling surface, and outputs table
+- [ ] Per-automation docs surface execution environment fields and invocation sites for every calling task
+- [ ] Per-integration docs render a per-command subsection with full argument and output schemas for every command in `commands_used`
+- [ ] `glossary.md` is present and every first-occurrence XSOAR term in the doc set links to it
 - [ ] Every relative link in generated docs resolves to a file in the output folder (no broken links)
 - [ ] Components missing from the manifest render as bold text with "external/builtin" annotation, not as links
+- [ ] Unauthorized reference catalogs degrade gracefully — incident-field tables fall back to CLI names only, no broken links
 - [ ] README dependency diagram renders in mermaid.live
 - [ ] Doc set renders cleanly in Confluence DC when the folder is uploaded with its structure preserved
 

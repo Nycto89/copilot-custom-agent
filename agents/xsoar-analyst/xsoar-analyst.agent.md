@@ -110,10 +110,11 @@ When the user asks you to document an entire workflow (root playbook + all depen
 4. **Read the manifest**: `investigation/docs/<sanitized-root-name>/manifest.json` drives everything. It lists each component, its fetched file path, and its cross-references.
 
 5. **Generate docs in the order defined by the workflow skill**:
-   - Integrations first (leaf dependencies)
-   - Automations next (may reference integrations)
-   - Per-playbook docs bottom-up (leaf sub-playbooks first, then callers). Each uses the **full deep-dive** template from the single-playbook documentation skill, with cross-reference links added per the workflow skill's rules.
-   - `README.md` last (workflow overview with dependency diagram, component tables, execution summary, cross-reference index).
+   - `glossary.md` first (so all concept-link references downstream resolve).
+   - Integrations next (per-command reference with full argument/output schemas).
+   - Automations next (includes invocation sites and execution environment details).
+   - Per-playbook docs bottom-up (leaf sub-playbooks first, then callers). Each gets a task-by-task walkthrough, decision map, manual-task catalog, error-handling surface, and outputs section — not just a summary.
+   - `README.md` last (workflow overview with **runbook narrative** — 3–5 prose paragraphs walking the workflow end to end — plus dependency diagram, component tables, incident-fields-used table, cross-reference index).
 
 6. **Verify cross-references before finishing**: every relative markdown link in the generated docs must resolve to a file in the output folder. Components not in the manifest render as **bold text** with `(not documented — builtin/external)`, not as a broken link.
 
@@ -198,9 +199,10 @@ investigation/docs/<sanitized-playbook-name>-documentation.md
 For workflow documentation, follow the structure defined in the XSOAR Workflow Documentation skill. Output to:
 ```
 investigation/docs/<sanitized-root-name>/
-├── README.md
+├── README.md         # Runbook narrative + overview + incident-fields-used
+├── glossary.md       # XSOAR concept definitions (linked from first use)
 ├── manifest.json
-├── playbooks/*.md
-├── automations/*.md
-└── integrations/*.md
+├── playbooks/*.md    # Task-by-task walkthrough, decision map, manual tasks, error surface
+├── automations/*.md  # Execution env + invocation sites + behaviour notes
+└── integrations/*.md # Per-command reference w/ full argument + output schemas
 ```

@@ -2,8 +2,10 @@
 Fetch a playbook and its entire dependency tree from Cortex XSOAR 6.14.
 
 Recursively walks sub-playbooks, then fetches every automation and integration
-referenced anywhere in the tree. Cycle-safe. Writes a manifest.json that the
-xsoar-workflow-documentation skill consumes to generate linked documentation.
+referenced anywhere in the tree, plus one-shot reference catalogs (incident
+fields, indicator types) the doc generator uses for cross-linking. Cycle-safe.
+Writes a manifest.json that the xsoar-workflow-documentation skill consumes to
+generate linked documentation.
 
 Usage:
     python scripts/python/fetch-workflow.py --name "EDL Update"
@@ -13,11 +15,13 @@ Output:
     investigation/playbooks/<name>.json        (one per playbook in tree)
     investigation/automations/<name>.json      (one per referenced automation)
     investigation/integrations/<name>.json     (one per referenced integration, creds stripped)
-    investigation/docs/<root>/manifest.json    (inventory + cross-references)
+    investigation/reference/<catalog>.json     (incident fields, indicator types — fetched once)
+    investigation/docs/<root>/manifest.json    (inventory + cross-references + per-task profiles)
 """
 
 import argparse
 import json
+import re
 import sys
 import os
 from collections import deque
@@ -33,6 +37,9 @@ SENSITIVE_FIELDS = {
     "secret", "private_key", "privateKey", "passphrase", "cert", "certificate",
     "client_secret", "clientSecret", "auth_token", "authToken",
 }
+
+INCIDENT_FIELD_RE = re.compile(r"\$\{\s*incident\.([A-Za-z0-9_]+)")
+INDICATOR_FIELD_RE = re.compile(r"\$\{\s*indicator\.([A-Za-z0-9_]+)")
 
 
 def strip_credentials(data):
@@ -50,6 +57,26 @@ def strip_credentials(data):
     if isinstance(data, list):
         return [strip_credentials(item) for item in data]
     return data
+
+
+def _walk_strings(obj):
+    """Yield every string value nested anywhere inside obj."""
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            yield from _walk_strings(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _walk_strings(v)
+
+
+def _scan_field_refs(obj, pattern):
+    found = set()
+    for s in _walk_strings(obj):
+        for match in pattern.finditer(s):
+            found.add(match.group(1))
+    return found
 
 
 def try_fetch_playbook_by_name(name):
@@ -128,27 +155,46 @@ def try_fetch_integration(name):
     return integrations[0]
 
 
-def extract_refs(playbook):
+def extract_playbook_profile(playbook):
     """
-    Extract sub-playbook references, automation references, and integration brands.
+    Walk a playbook once and emit both dependency refs and a deep per-task profile.
 
-    Sub-playbooks are keyed by playbookId (task names don't always match playbook names).
-    Automations are keyed by scriptId. A scriptId containing '|||' indicates an integration
-    command (e.g. 'PAN-OS|||panorama-get-edl'), not a standalone automation.
-
-    Returns:
-        sub_playbooks: dict of playbook_id -> display name (best effort)
-        automations: dict of script_id -> display name
-        integrations: dict of brand -> set of commands referenced
+    Returns a dict with:
+        sub_playbooks:  {playbook_id: display_name}   — for crawl BFS
+        automations:    {script_id: display_name}     — for fetch queue
+        integrations:   {brand: set(commands)}        — for fetch queue
+        tasks_by_id:    {task_id: task_profile_dict}  — full per-task detail
+        type_counts:    {task_type: count}
+        incident_fields_referenced:  sorted list of ${incident.X} names
+        indicator_fields_referenced: sorted list of ${indicator.X} names
+        inputs/outputs: from the playbook record's inputs[]/outputs[] arrays
+        starttaskid:    entry point task id
+        invocation_samples: list of (script_id|None, brand|None, command|None,
+                                      task_id, task_name, arguments) — for
+                                      threading into automation/integration
+                                      invocation-site manifests.
     """
     sub_playbooks = {}
     automations = {}
     integrations = {}
+    tasks_by_id = {}
+    type_counts = {}
+    incident_fields = set()
+    indicator_fields = set()
+    invocation_samples = []
 
-    tasks = playbook.get("tasks", {})
-    for task_data in tasks.values():
-        task_info = task_data.get("task", {})
+    tasks = playbook.get("tasks") or {}
+    for task_id, task_data in tasks.items():
+        task_info = task_data.get("task") or {}
         task_type = task_data.get("type", "")
+        type_counts[task_type] = type_counts.get(task_type, 0) + 1
+
+        script_args = (
+            task_data.get("scriptarguments")
+            or task_data.get("scriptArguments")
+            or {}
+        )
+        task_name = task_info.get("name")
 
         if task_type == "playbook":
             pb_id = task_info.get("playbookId")
@@ -156,9 +202,7 @@ def extract_refs(playbook):
             key = pb_id or pb_name
             if key:
                 sub_playbooks.setdefault(key, pb_name or pb_id)
-            continue
-
-        if task_type == "regular":
+        elif task_type == "regular":
             script_id = task_info.get("scriptId") or task_info.get("script") or ""
             script_name = task_info.get("scriptName") or script_id
 
@@ -166,15 +210,65 @@ def extract_refs(playbook):
                 brand, _, command = script_id.partition("|||")
                 if brand and brand not in ("Builtin", ""):
                     integrations.setdefault(brand, set()).add(command)
+                    invocation_samples.append({
+                        "kind": "integration_command",
+                        "brand": brand,
+                        "command": command,
+                        "task_id": task_id,
+                        "task_name": task_name,
+                        "arguments": script_args,
+                    })
             elif script_id and script_id not in ("Builtin", ""):
                 automations.setdefault(script_id, script_name)
+                invocation_samples.append({
+                    "kind": "automation",
+                    "script_id": script_id,
+                    "task_id": task_id,
+                    "task_name": task_name,
+                    "arguments": script_args,
+                })
 
-        # Explicit brand field on any task type
         brand = task_info.get("brand")
         if brand and brand not in ("Builtin", ""):
             integrations.setdefault(brand, set())
 
-    return sub_playbooks, automations, integrations
+        tasks_by_id[task_id] = {
+            "id": task_id,
+            "name": task_name,
+            "type": task_type,
+            "description": task_info.get("description"),
+            "scriptId": task_info.get("scriptId"),
+            "scriptName": task_info.get("scriptName"),
+            "scriptArguments": script_args,
+            "conditions": task_data.get("conditions"),
+            "fieldMapping": task_data.get("fieldMapping"),
+            "loop": task_data.get("loop"),
+            "form": task_info.get("form"),
+            "nexttasks": task_data.get("nexttasks"),
+            "continueonerror": task_data.get("continueonerror", False),
+            "reputationcalc": task_data.get("reputationcalc"),
+            "separatecontext": task_data.get("separatecontext"),
+            "playbookId": task_info.get("playbookId"),
+            "playbookName": task_info.get("playbookName"),
+            "brand": task_info.get("brand"),
+        }
+
+        incident_fields |= _scan_field_refs(task_data, INCIDENT_FIELD_RE)
+        indicator_fields |= _scan_field_refs(task_data, INDICATOR_FIELD_RE)
+
+    return {
+        "sub_playbooks": sub_playbooks,
+        "automations": automations,
+        "integrations": integrations,
+        "tasks_by_id": tasks_by_id,
+        "type_counts": type_counts,
+        "incident_fields_referenced": sorted(incident_fields),
+        "indicator_fields_referenced": sorted(indicator_fields),
+        "inputs": playbook.get("inputs") or [],
+        "outputs": playbook.get("outputs") or [],
+        "starttaskid": playbook.get("starttaskid"),
+        "invocation_samples": invocation_samples,
+    }
 
 
 def playbook_output_path(name):
@@ -189,11 +283,52 @@ def integration_output_path(name):
     return os.path.join("investigation", "integrations", xsoar_client.sanitize_filename(name) + ".json")
 
 
+def reference_output_path(name):
+    return os.path.join("investigation", "reference", xsoar_client.sanitize_filename(name) + ".json")
+
+
+def fetch_reference_catalogs():
+    """
+    Pull one-shot reference catalogs the doc generator cross-links against.
+    Tolerant of 4xx so a limited-permission API key doesn't abort the whole
+    crawl — records 'unauthorized' status instead.
+    """
+    catalogs = [
+        ("incident-fields", "GET", "/incidentfields"),
+        ("indicator-types", "GET", "/indicatortype"),
+    ]
+    result = {}
+    print("Fetching reference catalogs (incident fields, indicator types)...")
+    for slug, method, endpoint in catalogs:
+        data = xsoar_client.request(method, endpoint, allow_errors=True)
+        if data is None:
+            print(f"  (skip) '{slug}' — endpoint returned 4xx (likely unauthorized)")
+            result[slug] = {"status": "unauthorized", "file": None, "count": 0}
+            continue
+        path = reference_output_path(slug)
+        xsoar_client.save_json(data, path)
+        if isinstance(data, list):
+            count = len(data)
+        elif isinstance(data, dict):
+            count = len(data.get("items") or data.get("fields") or data)
+        else:
+            count = 0
+        print(f"  Fetched '{slug}' ({count} entries)")
+        result[slug] = {
+            "status": "fetched",
+            "file": path.replace("\\", "/"),
+            "count": count,
+        }
+    return result
+
+
 def crawl(root_playbook):
     """BFS walk from the root playbook. Returns the manifest dict."""
     playbooks_by_id = {}         # id → playbook record for manifest
-    automations_seen = {}        # scriptId → {"name": str, "used_by": set()}
-    integrations_seen = {}       # brand → {"used_by": set(), "commands": set()}
+    automations_seen = {}        # scriptId → {"name": str, "used_by": set(), "invocations": [...]}
+    integrations_seen = {}       # brand → {"used_by": set(), "commands": set(), "invocations": [...]}
+    workflow_incident_fields = set()
+    workflow_indicator_fields = set()
 
     queue = deque([(root_playbook, None)])  # (playbook obj, parent playbook name)
 
@@ -203,7 +338,6 @@ def crawl(root_playbook):
         pb_name = playbook.get("name", "unnamed-playbook")
 
         if pb_id in playbooks_by_id:
-            # Already processed — just record the new parent reference
             if parent and parent not in playbooks_by_id[pb_id]["parents"]:
                 playbooks_by_id[pb_id]["parents"].append(parent)
             print(f"  (skip) '{pb_name}' already fetched — cycle or shared sub-playbook")
@@ -212,13 +346,26 @@ def crawl(root_playbook):
         path = playbook_output_path(pb_name)
         xsoar_client.save_json(playbook, path)
 
-        sub_pbs, autos, integs = extract_refs(playbook)
+        profile = extract_playbook_profile(playbook)
+        sub_pbs = profile["sub_playbooks"]
+        autos = profile["automations"]
+        integs = profile["integrations"]
+
+        workflow_incident_fields.update(profile["incident_fields_referenced"])
+        workflow_indicator_fields.update(profile["indicator_fields_referenced"])
 
         playbooks_by_id[pb_id] = {
             "id": pb_id,
             "name": pb_name,
             "file": path.replace("\\", "/"),
             "parents": [parent] if parent else [],
+            "starttaskid": profile["starttaskid"],
+            "inputs": profile["inputs"],
+            "outputs": profile["outputs"],
+            "type_counts": profile["type_counts"],
+            "incident_fields_referenced": profile["incident_fields_referenced"],
+            "indicator_fields_referenced": profile["indicator_fields_referenced"],
+            "tasks_by_id": profile["tasks_by_id"],
             "sub_playbooks": [
                 {"id": spid, "name": spname} for spid, spname in sub_pbs.items()
             ],
@@ -230,24 +377,65 @@ def crawl(root_playbook):
             ],
         }
 
+        # Roll up per-task invocation samples into the seen-tables so
+        # automation and integration docs can render "called by" with task context.
+        for sample in profile["invocation_samples"]:
+            if sample["kind"] == "automation":
+                entry = automations_seen.setdefault(
+                    sample["script_id"],
+                    {"name": autos.get(sample["script_id"], sample["script_id"]),
+                     "used_by": set(), "invocations": []},
+                )
+                entry["used_by"].add(pb_name)
+                entry["invocations"].append({
+                    "playbook": pb_name,
+                    "playbook_id": pb_id,
+                    "task_id": sample["task_id"],
+                    "task_name": sample["task_name"],
+                    "arguments": sample["arguments"],
+                })
+            else:  # integration_command
+                entry = integrations_seen.setdefault(
+                    sample["brand"],
+                    {"used_by": set(), "commands": set(), "invocations": []},
+                )
+                entry["used_by"].add(pb_name)
+                entry["commands"].add(sample["command"])
+                entry["invocations"].append({
+                    "playbook": pb_name,
+                    "playbook_id": pb_id,
+                    "task_id": sample["task_id"],
+                    "task_name": sample["task_name"],
+                    "command": sample["command"],
+                    "arguments": sample["arguments"],
+                })
+
+        # Brand-only entries (integration tasks with no command invocation) still need registration.
+        for brand in integs:
+            entry = integrations_seen.setdefault(
+                brand, {"used_by": set(), "commands": set(), "invocations": []}
+            )
+            entry["used_by"].add(pb_name)
+            entry["commands"].update(integs[brand])
+
+        # Automations referenced by the profile but not captured via invocation_samples
+        # (defensive — keeps the old behavior of seeing every dep even on edge cases).
         for script_id, script_name in autos.items():
-            entry = automations_seen.setdefault(script_id, {"name": script_name, "used_by": set()})
+            entry = automations_seen.setdefault(
+                script_id,
+                {"name": script_name, "used_by": set(), "invocations": []},
+            )
             entry["used_by"].add(pb_name)
-        for brand, cmds in integs.items():
-            entry = integrations_seen.setdefault(brand, {"used_by": set(), "commands": set()})
-            entry["used_by"].add(pb_name)
-            entry["commands"].update(cmds)
 
         print(f"  Fetched playbook: {pb_name} "
-              f"(sub: {len(sub_pbs)}, auto: {len(autos)}, integ: {len(integs)})")
+              f"(tasks: {len(profile['tasks_by_id'])}, sub: {len(sub_pbs)}, "
+              f"auto: {len(autos)}, integ: {len(integs)})")
 
-        # Enqueue sub-playbooks not yet seen — fetch by ID when available
         for sp_id, sp_name in sub_pbs.items():
             if sp_id in playbooks_by_id:
                 if pb_name not in playbooks_by_id[sp_id]["parents"]:
                     playbooks_by_id[sp_id]["parents"].append(pb_name)
                 continue
-            # sp_id may be a real id or a fallback name (when playbookId was missing)
             sub_pb = try_fetch_playbook_by_id(sp_id)
             if sub_pb is None:
                 sub_pb = try_fetch_playbook_by_name(sp_name or sp_id)
@@ -269,6 +457,7 @@ def crawl(root_playbook):
                 "name": meta["name"],
                 "file": None,
                 "used_by_playbooks": sorted(meta["used_by"]),
+                "invocations": meta["invocations"],
                 "status": "not_found",
             })
             continue
@@ -280,7 +469,17 @@ def crawl(root_playbook):
             "name": display_name,
             "file": path.replace("\\", "/"),
             "used_by_playbooks": sorted(meta["used_by"]),
+            "invocations": meta["invocations"],
             "status": "fetched",
+            # Execution-environment fields the doc skill surfaces without re-opening the JSON.
+            "type": auto.get("type"),
+            "subtype": auto.get("subtype"),
+            "dockerImage": auto.get("dockerImage"),
+            "runOnce": auto.get("runOnce"),
+            "runAs": auto.get("runAs"),
+            "sensitive": auto.get("sensitive"),
+            "tags": auto.get("tags") or [],
+            "comment": auto.get("comment"),
         })
 
     # Fetch all integrations (strip creds). Attribute commands via integrationScript.
@@ -297,23 +496,50 @@ def crawl(root_playbook):
                 "used_by_playbooks": sorted(meta["used_by"]),
                 "commands_used": sorted(meta["commands"]),
                 "available_commands": [],
+                "command_schemas": {},
+                "invocations": meta["invocations"],
                 "status": "not_found",
             })
             continue
         cleaned = strip_credentials(integ)
+        assert isinstance(cleaned, dict)  # integ is always a dict from the API
         integration_script = cleaned.get("integrationScript") or {}
-        available = sorted({
-            c.get("name") for c in integration_script.get("commands", []) if c.get("name")
-        })
+        all_commands = integration_script.get("commands") or []
+        available = sorted({c.get("name") for c in all_commands if c.get("name")})
+        # Only store full schemas for commands actually invoked in this workflow —
+        # keeps the manifest bounded even for integrations with 100+ commands.
+        commands_by_name = {c.get("name"): c for c in all_commands if c.get("name")}
+        command_schemas = {}
+        for cmd in sorted(meta["commands"]):
+            schema = commands_by_name.get(cmd)
+            if schema is None:
+                command_schemas[cmd] = {
+                    "description": None,
+                    "arguments": [],
+                    "outputs": [],
+                    "status": "not_found_in_integration",
+                }
+            else:
+                command_schemas[cmd] = {
+                    "description": schema.get("description"),
+                    "arguments": schema.get("arguments") or [],
+                    "outputs": schema.get("outputs") or [],
+                    "deprecated": schema.get("deprecated", False),
+                }
         path = integration_output_path(cleaned.get("name") or cleaned.get("brand") or brand)
         xsoar_client.save_json(cleaned, path)
         integrations_manifest.append({
             "brand": cleaned.get("brand") or brand,
             "name": cleaned.get("name"),
+            "display": cleaned.get("display"),
+            "category": cleaned.get("category"),
+            "version": cleaned.get("version"),
             "file": path.replace("\\", "/"),
             "used_by_playbooks": sorted(meta["used_by"]),
             "commands_used": sorted(meta["commands"]),
             "available_commands": available,
+            "command_schemas": command_schemas,
+            "invocations": meta["invocations"],
             "status": "fetched",
         })
 
@@ -324,10 +550,14 @@ def crawl(root_playbook):
         "playbooks": list(playbooks_by_id.values()),
         "automations": automations_manifest,
         "integrations": integrations_manifest,
+        "workflow_incident_fields": sorted(workflow_incident_fields),
+        "workflow_indicator_fields": sorted(workflow_indicator_fields),
         "stats": {
             "playbooks": len(playbooks_by_id),
             "automations": len(automations_manifest),
             "integrations": len(integrations_manifest),
+            "incident_fields_referenced": len(workflow_incident_fields),
+            "indicator_fields_referenced": len(workflow_indicator_fields),
         },
     }
 
@@ -355,7 +585,11 @@ def main():
     root_name = root.get("name", "unnamed-playbook")
     print(f"Crawling dependency tree for: {root_name}\n")
 
+    reference_catalogs = fetch_reference_catalogs()
+    print()
+
     manifest = crawl(root)
+    manifest["reference_catalogs"] = reference_catalogs
 
     manifest_dir = os.path.join("investigation", "docs", xsoar_client.sanitize_filename(root_name))
     manifest_path = os.path.join(manifest_dir, "manifest.json")
@@ -364,10 +598,12 @@ def main():
     s = manifest["stats"]
     print(f"\n{'=' * 60}")
     print(f"Workflow: {root_name}")
-    print(f"  Playbooks:    {s['playbooks']}")
-    print(f"  Automations:  {s['automations']}")
-    print(f"  Integrations: {s['integrations']}")
-    print(f"  Manifest:     {manifest_path}")
+    print(f"  Playbooks:          {s['playbooks']}")
+    print(f"  Automations:        {s['automations']}")
+    print(f"  Integrations:       {s['integrations']}")
+    print(f"  Incident fields:    {s['incident_fields_referenced']}")
+    print(f"  Indicator fields:   {s['indicator_fields_referenced']}")
+    print(f"  Manifest:           {manifest_path}")
     print(f"{'=' * 60}")
 
 
