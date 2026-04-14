@@ -33,6 +33,15 @@ The agent runs entirely within VS Code using GitHub Copilot Chat (GPT-4.1) with 
 - Grouped/collapsed diagrams for large playbooks (30+ tasks)
 - Documentation output to `investigation/docs/`
 
+### Phase 1.6 — Document Full Workflow (Current)
+- Recursive fetch of a root playbook's entire dependency tree (sub-playbooks, automations, integrations)
+- Cycle-safe via visited-set; unlimited depth
+- Linked document set with cross-references — shared components documented once and referenced from every consumer
+- Per-workflow output folder: `investigation/docs/<root>/` with `README.md`, `playbooks/`, `automations/`, `integrations/` subfolders
+- Workflow overview with dependency graph, component tables, execution summary, cross-reference index
+- Manifest JSON drives doc generation and link resolution
+- All per-playbook docs reuse the Phase 1.5 full deep-dive template
+
 ### Phase 2 — Refactor (Future)
 - Suggest specific code changes to fix identified issues
 - Generate refactored playbook YAML/JSON
@@ -56,7 +65,8 @@ VS Code + GitHub Copilot Chat (GPT-4.1)
     |       |
     |       |--- Skill: shared-standards/SKILL.md (tone, formatting, security)
     |       |--- Skill: xsoar-playbook-analysis/SKILL.md (domain knowledge)
-    |       |--- Skill: xsoar-playbook-documentation/SKILL.md (doc generation)
+    |       |--- Skill: xsoar-playbook-documentation/SKILL.md (single-playbook doc generation)
+    |       |--- Skill: xsoar-workflow-documentation/SKILL.md (linked workflow doc set)
     |       |
     |       |--- Tool: run_in_terminal → Python fetch scripts
     |       |--- Tool: read_file → Read downloaded playbook JSON
@@ -68,6 +78,7 @@ VS Code + GitHub Copilot Chat (GPT-4.1)
     |       |--- fetch-playbook.py
     |       |--- fetch-automations.py
     |       |--- fetch-integrations.py
+    |       |--- fetch-workflow.py (recursive dependency crawler, writes manifest)
     |
     |--- Local Storage (investigation/ — gitignored)
             |--- playbooks/    (downloaded playbook JSON)
@@ -75,6 +86,7 @@ VS Code + GitHub Copilot Chat (GPT-4.1)
             |--- integrations/ (sanitized integration JSON)
             |--- reports/      (analysis report markdown)
             |--- docs/         (playbook documentation markdown)
+            |     |--- <root>/ (per-workflow folder: README.md, manifest.json, playbooks/, automations/, integrations/)
 ```
 
 ---
@@ -87,10 +99,12 @@ VS Code + GitHub Copilot Chat (GPT-4.1)
 | `skills/shared-standards/SKILL.md` | Repo-wide tone, formatting, security baseline | None |
 | `skills/xsoar-playbook-analysis/SKILL.md` | XSOAR 6.14 schema reference, 8-category analysis checklist, anti-patterns, report template | None |
 | `skills/xsoar-playbook-documentation/SKILL.md` | Confluence DC doc templates (full + summary), mermaid generation algorithm, formatting guidelines | None |
+| `skills/xsoar-workflow-documentation/SKILL.md` | Linked workflow doc set — overview template, per-component templates, cross-reference rules, dependency diagram generation | `xsoar-playbook-documentation` |
 | `scripts/python/xsoar_client.py` | Shared XSOAR REST API client — auth, headers, error handling, file I/O | `requests` |
 | `scripts/python/fetch-playbook.py` | Fetch playbook by name or ID, save to investigation/playbooks/ | `xsoar_client` |
 | `scripts/python/fetch-automations.py` | Fetch automations by name, ID, or playbook reference | `xsoar_client` |
 | `scripts/python/fetch-integrations.py` | Fetch integration metadata with credential stripping | `xsoar_client` |
+| `scripts/python/fetch-workflow.py` | Recursive dependency crawler — fetches root playbook's entire tree, writes manifest.json | `xsoar_client` |
 | `scripts/python/requirements.txt` | Python dependencies | None |
 | `templates/agents/agent-template.agent.md` | Generic agent template for creating new agents | None |
 
@@ -248,6 +262,20 @@ The agent evaluates playbooks against these 8 categories (full details in the an
 - [ ] Documentation is written to `investigation/docs/`
 - [ ] Ambiguous prompts trigger a clarifying question
 - [ ] No credentials or incident data appear in documentation output
+
+## Success Criteria — Phase 1.6 (Document Full Workflow)
+
+- [ ] `fetch-workflow.py` recursively walks sub-playbooks and produces a valid `manifest.json`
+- [ ] Cycle detection prevents infinite loops on self-referencing or shared sub-playbooks
+- [ ] All automations referenced anywhere in the tree are fetched (name-resolution failures are skipped, not fatal)
+- [ ] All integrations referenced anywhere in the tree are fetched with credentials stripped
+- [ ] Agent correctly routes "workflow" / "comprehensive" / "dependency tree" prompts
+- [ ] Linked doc set produced under `investigation/docs/<root>/` with README, manifest, and the three subfolders
+- [ ] Per-playbook docs reuse the Phase 1.5 full deep-dive template and include cross-reference links to automations, integrations, and sub-playbooks
+- [ ] Every relative link in generated docs resolves to a file in the output folder (no broken links)
+- [ ] Components missing from the manifest render as bold text with "external/builtin" annotation, not as links
+- [ ] README dependency diagram renders in mermaid.live
+- [ ] Doc set renders cleanly in Confluence DC when the folder is uploaded with its structure preserved
 
 ---
 
