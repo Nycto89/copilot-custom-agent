@@ -295,10 +295,9 @@ def fetch_reference_catalogs():
     """
     catalogs = [
         ("incident-fields", "GET", "/incidentfields"),
-        ("indicator-types", "GET", "/indicatortype"),
     ]
     result = {}
-    print("Fetching reference catalogs (incident fields, indicator types)...")
+    print("Fetching reference catalogs (incident fields)...")
     for slug, method, endpoint in catalogs:
         # Pull raw text first so we can persist whatever XSOAR returned even if
         # it doesn't parse as JSON. Some 6.14 builds return NDJSON, wrapped

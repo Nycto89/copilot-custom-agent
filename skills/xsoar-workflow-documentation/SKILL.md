@@ -28,7 +28,7 @@ A manifest must exist at `investigation/docs/<sanitized-root-name>/manifest.json
 python scripts/python/fetch-workflow.py --name "<root playbook name>"
 ```
 
-The script recursively fetches every playbook in the tree, every referenced automation, every referenced integration (credentials stripped), and one-shot reference catalogs (incident fields, indicator types) used for cross-linking. If the manifest is absent, run the fetch script first.
+The script recursively fetches every playbook in the tree, every referenced automation, every referenced integration (credentials stripped), and a one-shot incident-fields catalog used to resolve display names for fields the workflow actually uses. If the manifest is absent, run the fetch script first.
 
 ## Output Structure
 
@@ -302,7 +302,7 @@ Bulleted list of every entry in `available_commands`. Do not duplicate the schem
 # Workflow Documentation: <root playbook name>
 
 Generated: <date> · Root: <name> · Version: <v>
-Components: <N> playbooks · <N> automations · <N> integrations · <N> incident fields · <N> indicator types
+Components: <N> playbooks · <N> automations · <N> integrations · <N> incident fields
 
 ## Table of Contents
 - [Purpose](#purpose)
@@ -458,7 +458,7 @@ The glossary is generated from a **fixed** template — don't let the model inve
 - All inter-document links are **relative** (`./`, `../`) so the folder is portable (zip, upload, share).
 - Filenames use `sanitize_filename(name)` — match the fetch script exactly.
 - Components **not in manifest** (e.g., Builtin operations, external playbooks not fetched) render as **bold text** with `(not documented — builtin/external)`, not as a broken link.
-- Reference-catalog misses (`reference_catalogs[*].status != "fetched"`): render referenced incident fields / indicator types as plain text with a small note, never as a broken link.
+- Reference-catalog miss (`reference_catalogs["incident-fields"].status != "fetched"`): render referenced incident fields as plain text (cliName only) with a small note, never as a broken link.
 - Broken links are not acceptable output. Before finishing, scan generated docs and verify every `.md` link resolves to a file in the output folder.
 
 ## Dependency Diagram Generation (README)
@@ -481,7 +481,7 @@ Fields the doc generator relies on:
 - `playbooks[]`, `automations[]`, `integrations[]`
 - `workflow_incident_fields` — sorted list of `${incident.X}` names referenced anywhere in the tree.
 - `workflow_indicator_fields` — same for `${indicator.X}`.
-- `reference_catalogs` — `{"incident-fields": {"status": "...", "file": "...", "count": N}, "indicator-types": {...}}`.
+- `reference_catalogs` — `{"incident-fields": {"status": "...", "file": "...", "count": N}}`.
 
 **Per playbook (`playbooks[]`):**
 - `id`, `name`, `file`, `parents`, `starttaskid`, `inputs[]`, `outputs[]`
