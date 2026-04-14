@@ -32,9 +32,10 @@ This repo mirrors a real enterprise Copilot-native agent project with the follow
 .github/agents/       # Always-on agents
 .github/prompts/      # Slash commands
 .vscode/mcp.json      # MCP config (not yet in use at work)
-agents/               # Agent definitions
+agents/               # Agent definitions (agents/<name>/<name>.agent.md)
 commands/             # Command definitions
 docs/                 # Per-domain documentation
+investigation/        # Gitignored scratch space for testing and agent output
 rules/                # Guardrail rules (common, cloud, kubernetes)
 scripts/              # Python and PowerShell utility scripts
 skills/               # Reusable SKILL.md files
@@ -59,15 +60,19 @@ A Copilot-native agent toolkit that automates dev workflow tasks. Current compon
 
 | Component | Location | Status |
 |-----------|----------|--------|
-| Issue triage agent | `agents/triage-agent/` | ✅ Ready to test |
+| Agent template | `templates/agents/` | ✅ Built |
+| Shared standards skill | `skills/shared-standards/` | ✅ Built |
+| XSOAR playbook analyst | `agents/xsoar-analyst/` | ✅ Built |
+| XSOAR analysis skill | `skills/xsoar-playbook-analysis/` | ✅ Built |
+| XSOAR fetch scripts | `scripts/python/` | ✅ Built |
+| XSOAR analyst PRD | `docs/xsoar-analyst-prd.md` | ✅ Built |
+| Issue triage agent | `agents/triage-agent/` | 🔲 Milestone 1 |
 | PR review agent | `agents/pr-review-agent/` | 🔲 Milestone 2 |
 | Doc sync agent | `agents/doc-sync-agent/` | 🔲 Milestone 2 |
-| Shared standards skill | `skills/shared-standards/` | ✅ Built |
 | Slash commands | `.github/prompts/` | 🔲 Milestone 3 |
-| Cloud guardrails | `rules/cloud/` | ✅ Built |
-| K8s guardrails | `rules/kubernetes/` | ✅ Built |
-| Common guardrails | `rules/common/` | ✅ Built |
-| Python scripts | `scripts/python/` | 🔲 Milestone 5 |
+| Cloud guardrails | `rules/cloud/` | 🔲 Milestone 4 |
+| K8s guardrails | `rules/kubernetes/` | 🔲 Milestone 4 |
+| Common guardrails | `rules/common/` | 🔲 Milestone 4 |
 | PowerShell scripts | `scripts/powershell/` | 🔲 Milestone 5 |
 
 See `MILESTONES.md` for the full task breakdown and GitHub issues to copy in.
@@ -81,9 +86,12 @@ See `MILESTONES.md` for the full task breakdown and GitHub issues to copy in.
 - Skills live in `skills/<skill-name>/SKILL.md`
 - Rules are Markdown files in `rules/<environment>/`
 - Scripts follow the pattern: `scripts/<language>/<purpose>.<ext>`
+- Shared Python modules (e.g., API clients) live alongside scripts in `scripts/python/`
 - New agents must be built from `templates/agents/agent-template.agent.md`
+- All agents must reference `skills/shared-standards/SKILL.md` in their frontmatter
 - Never commit secrets — use environment variables for all tokens
-- `investigation/` is gitignored scratch space — use it freely for testing
+- `investigation/` is gitignored scratch space — agents write output here (reports, downloads, etc.)
+- Agent-specific PRDs and documentation go in `docs/`
 
 ---
 
@@ -111,6 +119,7 @@ See `MILESTONES.md` for the full task breakdown and GitHub issues to copy in.
 
 Sample issues for testing the triage agent are in `examples/sample-issues/test-issues.md`.
 Use `investigation/` as scratch space for any ad-hoc testing — it's gitignored.
+Subdirectories under `investigation/` are created per-agent as needed (e.g., `playbooks/`, `reports/`).
 
 ---
 
