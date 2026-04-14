@@ -48,7 +48,7 @@ templates/            # Agent and skill starter templates
 - Scripts must be Python or PowerShell only — no Bash, Go, or JavaScript
 - All agents must reference `skills/shared-standards/SKILL.md` for tone and label conventions
 - Guardrail rules in `rules/` are not optional — agents that touch cloud or k8s configs
-  must enforce them
+  must enforce them, everything else uses common rules
 - Never suggest patterns that would require admin-level GitHub permissions for basic
   agent operation
 
