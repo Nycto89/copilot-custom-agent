@@ -26,6 +26,13 @@ The agent runs entirely within VS Code using GitHub Copilot Chat (GPT-4.1) with 
 - Produce chat summaries and written reports
 - Credential stripping on all integration metadata
 
+### Phase 1.5 — Document (Current)
+- Generate Confluence Data Center wiki-ready documentation from playbook JSON
+- Configurable detail levels: Full Deep-Dive (task-by-task) or Executive Summary
+- Mermaid.js flowchart generation from the playbook task graph
+- Grouped/collapsed diagrams for large playbooks (30+ tasks)
+- Documentation output to `investigation/docs/`
+
 ### Phase 2 — Refactor (Future)
 - Suggest specific code changes to fix identified issues
 - Generate refactored playbook YAML/JSON
@@ -49,6 +56,7 @@ VS Code + GitHub Copilot Chat (GPT-4.1)
     |       |
     |       |--- Skill: shared-standards/SKILL.md (tone, formatting, security)
     |       |--- Skill: xsoar-playbook-analysis/SKILL.md (domain knowledge)
+    |       |--- Skill: xsoar-playbook-documentation/SKILL.md (doc generation)
     |       |
     |       |--- Tool: run_in_terminal → Python fetch scripts
     |       |--- Tool: read_file → Read downloaded playbook JSON
@@ -66,6 +74,7 @@ VS Code + GitHub Copilot Chat (GPT-4.1)
             |--- automations/  (downloaded automation JSON)
             |--- integrations/ (sanitized integration JSON)
             |--- reports/      (analysis report markdown)
+            |--- docs/         (playbook documentation markdown)
 ```
 
 ---
@@ -77,6 +86,7 @@ VS Code + GitHub Copilot Chat (GPT-4.1)
 | `agents/xsoar-analyst/xsoar-analyst.agent.md` | Agent definition — role, workflow, constraints, output format | Both skills |
 | `skills/shared-standards/SKILL.md` | Repo-wide tone, formatting, security baseline | None |
 | `skills/xsoar-playbook-analysis/SKILL.md` | XSOAR 6.14 schema reference, 8-category analysis checklist, anti-patterns, report template | None |
+| `skills/xsoar-playbook-documentation/SKILL.md` | Confluence DC doc templates (full + summary), mermaid generation algorithm, formatting guidelines | None |
 | `scripts/python/xsoar_client.py` | Shared XSOAR REST API client — auth, headers, error handling, file I/O | `requests` |
 | `scripts/python/fetch-playbook.py` | Fetch playbook by name or ID, save to investigation/playbooks/ | `xsoar_client` |
 | `scripts/python/fetch-automations.py` | Fetch automations by name, ID, or playbook reference | `xsoar_client` |
@@ -215,7 +225,7 @@ The agent evaluates playbooks against these 8 categories (full details in the an
 
 ---
 
-## Success Criteria — Phase 1
+## Success Criteria — Phase 1 (Analyze)
 
 - [ ] Python scripts successfully connect to XSOAR and fetch playbook data
 - [ ] Agent can be invoked in Copilot Chat and understands the workflow
@@ -226,6 +236,18 @@ The agent evaluates playbooks against these 8 categories (full details in the an
 - [ ] Integration metadata has all credentials stripped
 - [ ] No incident data or secrets appear in any output
 - [ ] Agent can fetch and reference automations/integrations for supporting context
+
+## Success Criteria — Phase 1.5 (Document)
+
+- [ ] Agent correctly routes "document" vs "analyze" requests
+- [ ] Agent generates Full Deep-Dive documentation with all template sections
+- [ ] Agent generates Executive Summary documentation when requested
+- [ ] Mermaid flowchart is valid and renders in mermaid.live
+- [ ] Large playbooks (30+ tasks) produce grouped/collapsed mermaid diagrams
+- [ ] Documentation renders cleanly when pasted into Confluence Data Center
+- [ ] Documentation is written to `investigation/docs/`
+- [ ] Ambiguous prompts trigger a clarifying question
+- [ ] No credentials or incident data appear in documentation output
 
 ---
 

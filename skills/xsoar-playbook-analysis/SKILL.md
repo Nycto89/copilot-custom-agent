@@ -1,5 +1,5 @@
 ---
-name: XSOAR Playbook Analysis
+name: xsoar-playbook-analysis
 description: >
   XSOAR 6.14 playbook structure knowledge, best practices checklist,
   anti-pattern detection, and report template. Used by the xsoar-analyst

@@ -2,17 +2,29 @@
 Shared XSOAR REST API client for Cortex XSOAR 6.14.
 
 All fetch scripts import this module for connection handling.
-Requires environment variables:
-    XSOAR_URL      - Base URL of the XSOAR server (e.g., https://xsoar.example.com)
-    XSOAR_API_KEY  - API key for authentication
+Credentials can be provided via:
+    1. A .env file in scripts/python/ (loaded automatically via python-dotenv)
+    2. Shell environment variables (take precedence over .env)
+
+Required variables:
+    XSOAR_URL        - Base URL of the XSOAR server (e.g., https://xsoar.example.com)
+    XSOAR_API_KEY    - API key for authentication
     XSOAR_VERIFY_SSL - Optional. Set to "false" to disable SSL verification (default: true)
+
+See scripts/python/.env.example for the expected format.
 """
 
 import os
 import sys
 import json
+from pathlib import Path
 import requests
 import urllib3
+from dotenv import load_dotenv
+
+# Load .env from the same directory as this script, regardless of working directory
+_env_path = Path(__file__).resolve().parent / ".env"
+load_dotenv(_env_path)
 
 
 def get_config():
