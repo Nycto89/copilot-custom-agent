@@ -63,21 +63,26 @@ def get_headers(api_key):
     }
 
 
-def request(method, endpoint, body=None, params=None):
+def request(method, endpoint, body=None, params=None, allow_errors=False):
     """
     Make an authenticated request to the XSOAR REST API.
 
     Args:
-        method:   HTTP method (GET, POST, PUT, DELETE)
-        endpoint: API path, e.g. "/playbook/search"
-        body:     Optional dict for JSON request body
-        params:   Optional dict for query parameters
+        method:       HTTP method (GET, POST, PUT, DELETE)
+        endpoint:     API path, e.g. "/playbook/search"
+        body:         Optional dict for JSON request body
+        params:       Optional dict for query parameters
+        allow_errors: If True, return None on 4xx instead of exiting. Use this
+                      when a 4xx is a legitimate "not found" signal (e.g. a
+                      sub-playbook lookup that should fall back to a name
+                      search). Auth errors (401/403) still exit regardless.
 
     Returns:
-        Parsed JSON response as a dict/list.
+        Parsed JSON response as a dict/list, or None when allow_errors=True
+        and the server returned a 4xx.
 
     Raises:
-        SystemExit on connection or authentication errors.
+        SystemExit on connection, auth, or (unless allow_errors) 4xx/5xx errors.
     """
     config = get_config()
     url = f"{config['url']}{endpoint}"
@@ -110,9 +115,13 @@ def request(method, endpoint, body=None, params=None):
         print("The API key may lack permissions for this endpoint.", file=sys.stderr)
         sys.exit(1)
     elif response.status_code == 404:
+        if allow_errors:
+            return None
         print(f"ERROR: Endpoint not found (404): {endpoint}", file=sys.stderr)
         sys.exit(1)
     elif response.status_code >= 400:
+        if allow_errors:
+            return None
         print(f"ERROR: API returned status {response.status_code}", file=sys.stderr)
         print(f"Response: {response.text[:500]}", file=sys.stderr)
         sys.exit(1)

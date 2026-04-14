@@ -66,7 +66,25 @@ def try_fetch_playbook_by_name(name):
 
 
 def try_fetch_playbook_by_id(playbook_id):
-    result = xsoar_client.request("GET", f"/playbook/{playbook_id}")
+    """
+    Resolve a playbook when we have what the parent task called a 'playbookId'.
+
+    XSOAR 6.x authored content stores either a GUID or the display name in
+    task.task.playbookId, so GET /playbook/{id} 400s ('createPlaybookErr')
+    whenever the value is actually a name. Search by id first — it tolerates
+    both forms and returns an empty list on a miss — then fall back to the
+    direct GET for ids that the search indexer hasn't picked up yet.
+    """
+    body = {"query": f'id:"{playbook_id}"', "page": 0, "size": 5}
+    result = xsoar_client.request("POST", "/playbook/search", body=body, allow_errors=True)
+    if result:
+        playbooks = result.get("playbooks", [])
+        for pb in playbooks:
+            if pb.get("id") == playbook_id:
+                return pb
+        if playbooks:
+            return playbooks[0]
+    result = xsoar_client.request("GET", f"/playbook/{playbook_id}", allow_errors=True)
     return result or None
 
 
