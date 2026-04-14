@@ -300,12 +300,43 @@ def fetch_reference_catalogs():
     result = {}
     print("Fetching reference catalogs (incident fields, indicator types)...")
     for slug, method, endpoint in catalogs:
-        data = xsoar_client.request(method, endpoint, allow_errors=True)
-        if data is None:
+        # Pull raw text first so we can persist whatever XSOAR returned even if
+        # it doesn't parse as JSON. Some 6.14 builds return NDJSON, wrapped
+        # payloads, or HTML error pages on these endpoints depending on perms.
+        text = xsoar_client.request(method, endpoint, allow_errors=True, return_text=True)
+        if text is None:
             print(f"  (skip) '{slug}' — endpoint returned 4xx (likely unauthorized)")
             result[slug] = {"status": "unauthorized", "file": None, "count": 0}
             continue
+        if not text.strip():
+            print(f"  (skip) '{slug}' — empty response body")
+            result[slug] = {"status": "empty", "file": None, "count": 0}
+            continue
+
         path = reference_output_path(slug)
+        try:
+            data = json.loads(text)
+        except ValueError as e:
+            # Try NDJSON (one JSON object per line) before giving up.
+            lines = [ln for ln in text.splitlines() if ln.strip()]
+            try:
+                data = [json.loads(ln) for ln in lines]
+                print(f"  Parsed '{slug}' as NDJSON ({len(data)} entries)")
+            except ValueError:
+                raw_path = path[:-5] + ".raw.txt"
+                os.makedirs(os.path.dirname(raw_path), exist_ok=True)
+                with open(raw_path, "w", encoding="utf-8") as f:
+                    f.write(text)
+                print(f"  (skip) '{slug}' — could not parse response as JSON ({e}). Raw body saved to {raw_path}")
+                result[slug] = {
+                    "status": "parse_error",
+                    "file": None,
+                    "raw_file": raw_path.replace("\\", "/"),
+                    "count": 0,
+                    "error": str(e),
+                }
+                continue
+
         xsoar_client.save_json(data, path)
         if isinstance(data, list):
             count = len(data)

@@ -63,7 +63,7 @@ def get_headers(api_key):
     }
 
 
-def request(method, endpoint, body=None, params=None, allow_errors=False):
+def request(method, endpoint, body=None, params=None, allow_errors=False, return_text=False):
     """
     Make an authenticated request to the XSOAR REST API.
 
@@ -126,10 +126,23 @@ def request(method, endpoint, body=None, params=None, allow_errors=False):
         print(f"Response: {response.text[:500]}", file=sys.stderr)
         sys.exit(1)
 
+    if return_text:
+        return response.text
+
     if not response.text:
         return {}
 
-    return response.json()
+    try:
+        return response.json()
+    except ValueError as e:
+        if allow_errors:
+            # Surface a short preview so callers can inspect what came back.
+            preview = response.text[:200].replace("\n", " ")
+            print(f"WARNING: {endpoint} returned non-JSON body ({e}). Preview: {preview!r}", file=sys.stderr)
+            return None
+        print(f"ERROR: {endpoint} returned non-JSON body: {e}", file=sys.stderr)
+        print(f"Response preview: {response.text[:500]!r}", file=sys.stderr)
+        sys.exit(1)
 
 
 def validate_connection():
